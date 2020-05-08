@@ -17,9 +17,8 @@
 #  limitations under the License.
 #
 from arch.api.utils import log_utils
-from federatedml.util import consts
 from federatedml.param.base_param import BaseParam
-
+from federatedml.util import consts
 
 LOGGER = log_utils.getLogger()
 
@@ -50,10 +49,17 @@ class EncryptParam(BaseParam):
             raise ValueError(
                 "encrypt_param's method {} not supported, should be str type".format(
                     self.method))
+        elif self.method is None:
+            pass
         else:
             user_input = self.method.lower()
-            if user_input == 'paillier':
+            if user_input == "paillier":
                 self.method = consts.PAILLIER
+            elif user_input == "iterativeaffine":
+                self.method = consts.ITERATIVEAFFINE
+            else:
+                raise ValueError(
+                    "encrypt_param's method {} not supported".format(user_input))
 
         if type(self.key_length).__name__ != "int":
             raise ValueError(
@@ -64,5 +70,3 @@ class EncryptParam(BaseParam):
 
         LOGGER.debug("Finish encrypt parameter check!")
         return True
-
-

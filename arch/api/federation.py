@@ -14,10 +14,9 @@
 #  limitations under the License.
 #
 
+import deprecated
+
 from arch.api import RuntimeInstance
-from arch.api import WorkMode
-from arch.api.standalone import federation as standalone_federation
-from arch.api.cluster import federation as cluster_federation
 
 
 def init(job_id, runtime_conf, server_conf_path="arch/conf/server_conf.json"):
@@ -39,40 +38,75 @@ def init(job_id, runtime_conf, server_conf_path="arch/conf/server_conf.json"):
             "guest": [10002]
         }
      }
+
     """
+    from arch.api.transfer import init
     if RuntimeInstance.MODE is None:
-        raise EnvironmentError("eggroll should be initialized before federation")
-    if RuntimeInstance.MODE == WorkMode.STANDALONE:
-        RuntimeInstance.FEDERATION = standalone_federation.init(job_id=job_id, runtime_conf=runtime_conf)
-    else:
-        RuntimeInstance.FEDERATION = cluster_federation.init(job_id=job_id, runtime_conf=runtime_conf,
-                                                             server_conf_path=server_conf_path)
+        raise EnvironmentError(
+            "table manager should be initialized before federation")
+
+    RuntimeInstance.FEDERATION, RuntimeInstance.TABLE_WRAPPER = init(session_id=job_id,
+                                                                     backend=RuntimeInstance.Backend,
+                                                                     work_mode=RuntimeInstance.MODE,
+                                                                     runtime_conf=runtime_conf,
+                                                                     server_conf_path=server_conf_path)
 
 
+def all_parties():
+    """
+    get all parties in order
+    """
+    return RuntimeInstance.FEDERATION.all_parties
+
+
+def local_party():
+    """
+    get local party
+    """
+    return RuntimeInstance.FEDERATION.local_party
+
+
+@deprecated.deprecated(version='1.2.0', reason="please use `get` api in transfer_variable instead")
 def get(name, tag: str, idx=-1):
     """
     This method will block until the remote object is fetched.
-    :param name: {alogrithm}.{variableName} defined in transfer_conf.json.
+    :param name: {algorithm}.{variableName} defined in transfer_conf.json.
     :param tag: object version, should be a string.
-    :param idx: idx of the party_ids in runtime role list, if out-of-range, list of all objects will be returned.
+    :param idx: idx of the party_ids in runtime role list, if idx < 0, list of all objects will be returned.
     :return: The object itself if idx is in range, else return list of all objects from possible source.
     """
-    return RuntimeInstance.FEDERATION.get(name=name, tag=tag, idx=idx)
+    src_role = RuntimeInstance.FEDERATION.authorized_src_roles(name)[0]
+    if idx < 0:
+        src_parties = RuntimeInstance.FEDERATION.roles_to_parties(roles=[src_role])
+        rtn = RuntimeInstance.FEDERATION.get(name=name, tag=tag, parties=src_parties)[0]
+        return [RuntimeInstance.TABLE_WRAPPER.boxed(value) for idx, value in enumerate(rtn)]
+    else:
+        src_node = RuntimeInstance.FEDERATION.role_to_party(role=src_role, idx=idx)
+        rtn = RuntimeInstance.FEDERATION.get(name=name, tag=tag, parties=src_node)[0][0]
+        return RuntimeInstance.TABLE_WRAPPER.boxed(rtn)
 
 
+@deprecated.deprecated(version='1.2.0', reason="please use `remote` api in transfer_variable instead")
 def remote(obj, name: str, tag: str, role=None, idx=-1):
     """
     This method will send an object to other parties
     :param obj: The object itself which can be pickled.
-    :param name: {alogrithm}.{variableName} defined in transfer_conf.json.
+    :param name: {algorithm}.{variableName} defined in transfer_conf.json.
     :param tag: tag: object version, should be a string.
     :param role: The role you want to send to.
-    :param idx: The idx of the party_ids of the role, if out-of-range, will send to all parties of the role.
+    :param idx: The idx of the party_ids of the role, if idx < 0, will send to all parties of the role.
     :return: None
     """
-    return RuntimeInstance.FEDERATION.remote(obj=obj, name=name, tag=tag, role=role, idx=idx)
-
-
-def get_runtime_conf():
-    return RuntimeInstance.FEDERATION.runtime_conf
-
+    obj = RuntimeInstance.TABLE_WRAPPER.unboxed(obj)
+    if idx >= 0 and role is None:
+        raise ValueError("role cannot be None if idx specified")
+    if idx >= 0:
+        dst_node = RuntimeInstance.FEDERATION.role_to_party(role=role, idx=idx)
+        return RuntimeInstance.FEDERATION.remote(obj=obj, name=name, tag=tag, parties=dst_node)
+    else:
+        if role is None:
+            role = RuntimeInstance.FEDERATION.authorized_dst_roles(name)
+        if isinstance(role, str):
+            role = [role]
+        dst_nodes = RuntimeInstance.FEDERATION.roles_to_parties(role)
+        return RuntimeInstance.FEDERATION.remote(obj=obj, name=name, tag=tag, parties=dst_nodes)

@@ -15,12 +15,12 @@
 #
 from typing import List
 
-from arch.api import storage
+from arch.api import session, WorkMode
 from arch.api.utils.core import current_timestamp, serialize_b64, deserialize_b64
-from fate_flow.db.db_models import DB, Job, Task, TrackingMetric
+from fate_flow.db.db_models import DB, Job, Task, TrackingMetric, DataView
 from fate_flow.entity.metric import Metric, MetricMeta
 from fate_flow.manager import model_manager
-from fate_flow.settings import stat_logger, API_VERSION
+from fate_flow.settings import stat_logger, API_VERSION, MAX_CONCURRENT_JOB_RUN_HOST
 from fate_flow.utils import job_utils, api_utils, model_utils
 from fate_flow.entity.constant_config import JobStatus, TaskStatus
 from fate_flow.entity.runtime_config import RuntimeConfig
@@ -156,7 +156,6 @@ class Tracking(object):
                         'and f_task_id = "{}"'.format(
                 self.get_table_index(), self.job_id, self.component_name if not job_level else 'dag', self.role,
                 self.party_id, self.task_id)
-            stat_logger.info(query_sql)
             cursor = DB.execute_sql(query_sql)
             for row in cursor.fetchall():
                 metrics[row[0]] = metrics.get(row[0], [])
@@ -177,27 +176,33 @@ class Tracking(object):
         if data_table:
             persistent_table = data_table.save_as(namespace=data_table._namespace,
                                                   name='{}_persistent'.format(data_table._name))
-            storage.save_data_table_meta(
+            session.save_data_table_meta(
                 {'schema': data_table.schema, 'header': data_table.schema.get('header', [])},
                 data_table_namespace=persistent_table._namespace, data_table_name=persistent_table._name)
             data_table_info = {
                 data_name: {'name': persistent_table._name, 'namespace': persistent_table._namespace}}
         else:
             data_table_info = {}
-        storage.save_data(
+        session.save_data(
             data_table_info.items(),
             name=Tracking.output_table_name('data'),
             namespace=self.table_namespace,
             partition=48)
+        self.save_data_view(self.role, self.party_id,
+                            data_info={'f_table_name': persistent_table._name if data_table else '',
+                                       'f_table_namespace': persistent_table._namespace if data_table else '',
+                                       'f_partition': persistent_table._partitions if data_table else None,
+                                       'f_table_create_count': data_table.count() if data_table else 0},
+                            mark=True)
 
     def get_output_data_table(self, data_name: str = 'component'):
-        output_data_info_table = storage.table(name=Tracking.output_table_name('data'),
+        output_data_info_table = session.table(name=Tracking.output_table_name('data'),
                                                namespace=self.table_namespace)
         data_table_info = output_data_info_table.get(data_name)
         if data_table_info:
-            data_table = storage.table(name=data_table_info.get('name', ''),
+            data_table = session.table(name=data_table_info.get('name', ''),
                                        namespace=data_table_info.get('namespace', ''))
-            data_table_meta = storage.get_data_table_metas_by_instance(data_table=data_table)
+            data_table_meta = data_table.get_metas()
             if data_table_meta.get('schema', None):
                 data_table.schema = data_table_meta['schema']
             return data_table
@@ -210,6 +215,9 @@ class Tracking(object):
                                                model_buffers=model_buffers,
                                                party_model_id=self.party_model_id,
                                                model_version=self.model_version)
+            self.save_data_view(self.role, self.party_id,
+                                data_info={'f_party_model_id': self.party_model_id,
+                                           'f_model_version': self.model_version})
             self.save_output_model_meta({'{}_module_name'.format(self.component_name): self.module_name})
 
     def get_output_model(self, model_name):
@@ -282,7 +290,6 @@ class Tracking(object):
                     self.get_table_index(), self.job_id, self.component_name if not job_level else 'dag', self.role,
                     self.party_id, self.task_id, metric_namespace, metric_name, data_type)
                 cursor = DB.execute_sql(query_sql)
-                stat_logger.info(query_sql)
                 for row in cursor.fetchall():
                     yield deserialize_b64(row[0]), deserialize_b64(row[1])
             except Exception as e:
@@ -297,6 +304,8 @@ class Tracking(object):
             if jobs:
                 job = jobs[0]
                 is_insert = False
+                if job.f_status == JobStatus.TIMEOUT:
+                    return None
             elif create:
                 job = Job()
                 job.f_create_time = current_timestamp()
@@ -306,14 +315,22 @@ class Tracking(object):
             job.f_role = role
             job.f_party_id = party_id
             if 'f_status' in job_info:
-                if job.f_status in [JobStatus.SUCCESS, JobStatus.FAILED, JobStatus.PARTIAL, JobStatus.DELETED]:
+                if job.f_status in [JobStatus.COMPLETE, JobStatus.FAILED]:
                     # Termination status cannot be updated
                     # TODO:
                     pass
+                if job_info['f_status'] == JobStatus.FAILED and not job.f_end_time:
+                    job.f_end_time = current_timestamp()
+                    job.f_elapsed = job.f_end_time - job.f_start_time
+                    job.f_update_time = current_timestamp()
             for k, v in job_info.items():
-                if k in ['f_job_id', 'f_role', 'f_party_id'] or v == getattr(Job, k).default:
-                    continue
-                setattr(job, k, v)
+                try:
+                    if k in ['f_job_id', 'f_role', 'f_party_id'] or v == getattr(Job, k).default:
+                        continue
+                    setattr(job, k, v)
+                except:
+                    pass
+
             if is_insert:
                 job.save(force_insert=True)
             else:
@@ -339,14 +356,17 @@ class Tracking(object):
             task.f_role = role
             task.f_party_id = party_id
             if 'f_status' in task_info:
-                if task.f_status in [TaskStatus.SUCCESS, TaskStatus.FAILED]:
+                if task.f_status in [TaskStatus.COMPLETE, TaskStatus.FAILED]:
                     # Termination status cannot be updated
                     # TODO:
                     pass
             for k, v in task_info.items():
-                if k in ['f_job_id', 'f_component_name', 'f_task_id', 'f_role', 'f_party_id'] or v == getattr(Task,
-                                                                                                              k).default:
-                    continue
+                try:
+                    if k in ['f_job_id', 'f_component_name', 'f_task_id', 'f_role', 'f_party_id'] or v == getattr(Task,
+                                                                                                                  k).default:
+                        continue
+                except:
+                    pass
                 setattr(task, k, v)
             if is_insert:
                 task.save(force_insert=True)
@@ -354,9 +374,53 @@ class Tracking(object):
                 task.save()
             return task
 
-    def clean_task(self):
+    def save_data_view(self, role, party_id, data_info, mark=False):
+        with DB.connection_context():
+            data_views = DataView.select().where(DataView.f_job_id == self.job_id,
+                                                 DataView.f_component_name == self.component_name,
+                                                 DataView.f_task_id == self.task_id,
+                                                 DataView.f_role == role,
+                                                 DataView.f_party_id == party_id)
+            is_insert = True
+            if mark and self.component_name == "upload_0":
+                return
+            if data_views:
+                data_view = data_views[0]
+                is_insert = False
+            else:
+                data_view = DataView()
+                data_view.f_create_time = current_timestamp()
+            data_view.f_job_id = self.job_id
+            data_view.f_component_name = self.component_name
+            data_view.f_task_id = self.task_id
+            data_view.f_role = role
+            data_view.f_party_id = party_id
+            data_view.f_update_time = current_timestamp()
+            for k, v in data_info.items():
+                if k in ['f_job_id', 'f_component_name', 'f_task_id', 'f_role', 'f_party_id'] or v == getattr(
+                        DataView, k).default:
+                    continue
+                setattr(data_view, k, v)
+            if is_insert:
+                data_view.save(force_insert=True)
+            else:
+                data_view.save()
+            return data_view
+
+    def clean_task(self, roles, party_ids):
         stat_logger.info('clean table by namespace {}'.format(self.task_id))
-        storage.clean_table(namespace=self.task_id, regex_string='*')
+        session.clean_tables(namespace=self.task_id, regex_string='*')
+        for role in roles.split(','):
+            for party_id in party_ids.split(','):
+                session.clean_tables(namespace=self.task_id + '_' + role + '_' + party_id, regex_string='*')
+
+
+    def job_quantity_constraint(self):
+        if RuntimeConfig.WORK_MODE == WorkMode.CLUSTER:
+            if self.role == 'host':
+                running_jobs = job_utils.query_job(status='running', role=self.role)
+                if len(running_jobs) >= MAX_CONCURRENT_JOB_RUN_HOST:
+                    raise Exception('The job running on the host side exceeds the maximum running amount')
 
     def get_table_namespace(self, job_level: bool = False):
         return self.table_namespace if not job_level else self.job_table_namespace

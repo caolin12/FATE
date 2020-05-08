@@ -10,9 +10,9 @@ We use json file which is actually a dict as a dsl config file. The first level 
 
     {
     "components" : {
-        ...
+            ...
+        }
     }
-}
 
 Then each component should be defined in second level. Here is an example of setting a component:
 
@@ -32,7 +32,7 @@ Then each component should be defined in second level. Here is an example of set
         "need_deploy": true
     }
 
-As the example shows, user define the component names as key of this module. But this module should end up with a "_num" where the num should start with 0.
+As the example shows, user define the component name as key of this module. But this module should end up with a "_num" where the num should start with 0.
 
 #### Field Specification
 1. module: Specify which component use. This field should be strictly same with file name in federatedml/conf/setting_conf except the .json suffix.
@@ -204,3 +204,52 @@ Beside the dsl conf, users also need to prepare a submit runtime conf to set the
 
 After finished these setting and submit the task, fate-flow will combine the parameters list in role-parameters and algorithm parameters. If there are still some fields are not defined, values in default runtime conf will be used. Then fate-flow will send these config files to their corresponding parties and start the federated modeling task.
 
+### Multi-host configuration
+
+For multi-host modeling case, all the host's party ids should be list in the role field.
+
+```
+"role": {
+    "guest": [
+      10000
+    ],
+    "host": [
+      10000, 10001, 10002
+    ],
+    "arbiter": [
+      10000
+    ]
+}
+```
+
+Each parameter set for host should also be list in a list. The number of elements should match the number of hosts.
+
+```
+    "host": {
+      "args": {
+        "data": {
+          "train_data": [
+            {
+              "name": "hetero_breast_host_1",
+              "namespace": "hetero_breast_host"
+            },
+            {
+              "name": "hetero_breast_host_2",
+              "namespace": "hetero_breast_host"
+            },
+            {
+              "name": "hetero_breast_host_3",
+              "namespace": "hetero_breast_host"
+            }
+
+          ]
+        }
+      },
+      "dataio_0": {
+        "with_label": [false, false, false],
+        "output_format": ["dense", "dense", "dense"],
+        "outlier_replace": [true, true, true]
+      },
+```
+
+The parameters set in algorithm parameters can keep it as it is. The parameters will be copied for every party.

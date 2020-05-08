@@ -13,11 +13,12 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 #
+from fate_flow.manager.data_manager import query_data_view, delete_table
 from fate_flow.utils.api_utils import get_json_result
 from fate_flow.settings import stat_logger
 from arch.api.utils.dtable_utils import get_table_info
+from arch.api import session
 from flask import Flask, request
-from arch.api import storage
 
 manager = Flask(__name__)
 
@@ -28,6 +29,26 @@ def internal_server_error(e):
     return get_json_result(retcode=100, retmsg=str(e))
 
 
+@manager.route('/delete', methods=['post'])
+def table_delete():
+    request_data = request.json
+    data_views = query_data_view(**request_data)
+    table_name = request_data.get('table_name')
+    namespace = request_data.get('namespace')
+    status = False
+    data = []
+    if table_name and namespace:
+        table = session.get_data_table(name=table_name, namespace=namespace)
+        table.destroy()
+        data.append({'table_name': table_name,
+                     'namespace': namespace})
+    elif data_views:
+        status, data = delete_table(data_views)
+    else:
+        return get_json_result(retcode=101, retmsg='no find table')
+    return get_json_result(retcode=(0 if status else 101), retmsg=('success' if status else 'failed'), data=data)
+
+
 @manager.route('/<table_func>', methods=['post'])
 def dtable(table_func):
     config = request.json
@@ -35,12 +56,17 @@ def dtable(table_func):
         table_name, namespace = get_table_info(config=config, create=config.get('create', False))
         if config.get('create', False):
             table_key_count = 0
+            table_partition = None
         else:
-            dtable = storage.get_data_table(name=table_name, namespace=namespace)
-            if dtable:
-                table_key_count = dtable.count()
+            table = session.get_data_table(name=table_name, namespace=namespace)
+            if table:
+                table_key_count = table.count()
+                table_partition = table.get_partitions()
             else:
                 table_key_count = 0
-        return get_json_result(data={'table_name': table_name, 'namespace': namespace, 'count': table_key_count})
+                table_partition = None
+        return get_json_result(data={'table_name': table_name, 'namespace': namespace, 'count': table_key_count, 'partition': table_partition})
     else:
         return get_json_result()
+
+

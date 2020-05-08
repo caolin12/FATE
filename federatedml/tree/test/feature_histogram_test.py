@@ -16,7 +16,7 @@
 
 import unittest
 
-from arch.api import eggroll
+from arch.api import session
 from federatedml.tree import FeatureHistogram
 from federatedml.feature.instance import Instance
 from federatedml.feature.sparse_vector import SparseVector
@@ -29,7 +29,7 @@ import random
 class TestFeatureHistogram(unittest.TestCase):
     def setUp(self):
         self.feature_histogram = FeatureHistogram()
-        eggroll.init("test_feature_histogram")
+        session.init("test_feature_histogram")
         data_insts = []
         for i in range(1000):
             indices = []
@@ -43,10 +43,10 @@ class TestFeatureHistogram(unittest.TestCase):
             data_insts.append((Instance(features=sparse_vec), (1, random.randint(0, 3))))
         self.node_map = {0: 0, 1: 1, 2: 2, 3: 3}
         self.data_insts = data_insts
-        self.data_bin = eggroll.parallelize(data_insts, include_key=False)
+        self.data_bin = session.parallelize(data_insts, include_key=False)
 
         self.grad_and_hess_list = [(random.random(), random.random()) for i in range(1000)]
-        self.grad_and_hess = eggroll.parallelize(self.grad_and_hess_list, include_key=False)
+        self.grad_and_hess = session.parallelize(self.grad_and_hess_list, include_key=False)
 
         bin_split_points = []
         for i in range(10):
@@ -59,9 +59,10 @@ class TestFeatureHistogram(unittest.TestCase):
                   for j in range(3)]
                  for k in range(4)]
                 for r in range(5)]
-        histograms = self.feature_histogram.accumulate_histogram(copy.deepcopy(data))
+        histograms = copy.deepcopy(data)
         for i in range(len(data)):
             for j in range(len(data[i])):
+                histograms[i][j] = self.feature_histogram.accumulate_histogram(histograms[i][j])
                 for k in range(1, len(data[i][j])):
                     for r in range(len(data[i][j][k])):
                         data[i][j][k][r] += data[i][j][k - 1][r]
@@ -87,28 +88,21 @@ class TestFeatureHistogram(unittest.TestCase):
 
         for i in range(len(his2)):
             for j in range(len(his2[i])):
+                his2[i][j] = self.feature_histogram.accumulate_histogram(his2[i][j])
                 for k in range(len(his2[i][j])):
                     for r in range(len(his2[i][j][k])):
                         self.assertTrue(np.fabs(his2[i][j][k][r] - histograms[i][j][k][r]) < consts.FLOAT_ZERO)
 
     def test_aggregate_histogram(self):
-        data1 = [[[[random.randint(0, 10) for i in range(2)]
-                   for j in range(3)]
-                  for k in range(4)]
-                 for r in range(5)]
+        data1 = [[random.randint(0, 10) for i in range(2)] for j in range(3)]
 
-        data2 = [[[[random.randint(0, 10) for i in range(2)]
-                   for j in range(3)]
-                  for k in range(4)]
-                 for r in range(5)]
+        data2 = [[random.randint(0, 10) for i in range(2)] for j in range(3)]
 
         agg_histograms = self.feature_histogram.aggregate_histogram(data1, data2)
         for i in range(len(data1)):
             for j in range(len(data1[i])):
-                for k in range(len(data1[i][j])):
-                    for r in range(len(data1[i][j][k])):
-                        data1[i][j][k][r] += data2[i][j][k][r]
-                        self.assertTrue(data1[i][j][k][r] == agg_histograms[i][j][k][r])
+                data1[i][j] += data2[i][j]
+                self.assertTrue(data1[i][j] == agg_histograms[i][j])
 
 
 if __name__ == '__main__':

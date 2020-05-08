@@ -23,15 +23,12 @@ sorting the occurred tags by lexicographic order, then fill the occur item with 
 Here is an example showing how to create a upload config file:
 ```
 {
-    "file": "examples/data/breast_b.csv",
-    "head": 1,
-    "partition": 10,
-    "local": {
-        "party_id": 10000,
-        "role": "guest"
-    },
-    "table_name": "hetero_feature_selection_host",
-    "namespace": "hetero_feature_selection"
+  "file": "examples/data/breast_b.csv",
+  "head": 1,
+  "partition": 10,
+  "work_mode": 0,
+  "table_name": "hetero_breast_b",
+  "namespace": "hetero_guest_breast"
 }
 ```
 
@@ -48,7 +45,7 @@ We use fate-flow to upload data. The command is as follows:
 
 > python ${your_install_path}/fate_flow/fate_flow_client.py -f upload -c dsl_test/upload_data.json
 
-Note: This step is needed for every data-provide node(i.e. Guest and Host).
+Note: This step is needed for every data-provide party(i.e. Guest and Host).
 
 After running this command, the following information is shown if it is success.
 

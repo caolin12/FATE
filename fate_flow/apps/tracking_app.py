@@ -22,11 +22,11 @@ import tarfile
 from flask import Flask, request, send_file
 from google.protobuf import json_format
 
-from arch.api import storage
 from arch.api.utils.core import deserialize_b64
 from arch.api.utils.core import get_fate_uuid
 from arch.api.utils.core import json_loads
 from fate_flow.db.db_models import Job, DB
+from fate_flow.manager.data_manager import query_data_view, delete_metric_data
 from fate_flow.manager.tracking import Tracking
 from fate_flow.settings import stat_logger
 from fate_flow.utils import job_utils, data_utils
@@ -99,26 +99,6 @@ def component_metrics():
         return get_json_result(retcode=0, retmsg='no data', data={})
 
 
-@manager.route('/<job_id>/<component_name>/<task_id>/<role>/<party_id>/metric_data/save', methods=['POST'])
-def save_metric_data(job_id, component_name, task_id, role, party_id):
-    request_data = request.json
-    tracker = Tracking(job_id=job_id, component_name=component_name, task_id=task_id, role=role, party_id=party_id)
-    metrics = [deserialize_b64(metric) for metric in request_data['metrics']]
-    tracker.save_metric_data(metric_namespace=request_data['metric_namespace'], metric_name=request_data['metric_name'],
-                             metrics=metrics, job_level=request_data['job_level'])
-    return get_json_result()
-
-
-@manager.route('/<job_id>/<component_name>/<task_id>/<role>/<party_id>/metric_meta/save', methods=['POST'])
-def save_metric_meta(job_id, component_name, task_id, role, party_id):
-    request_data = request.json
-    tracker = Tracking(job_id=job_id, component_name=component_name, task_id=task_id, role=role, party_id=party_id)
-    metric_meta = deserialize_b64(request_data['metric_meta'])
-    tracker.save_metric_meta(metric_namespace=request_data['metric_namespace'], metric_name=request_data['metric_name'],
-                             metric_meta=metric_meta, job_level=request_data['job_level'])
-    return get_json_result()
-
-
 @manager.route('/component/metric_data', methods=['post'])
 def component_metric_data():
     request_data = request.json
@@ -147,6 +127,12 @@ def get_metric_all_data(tracker, metric_namespace, metric_name):
         return [], {}
 
 
+@manager.route('/component/metric/delete', methods=['post'])
+def component_metric_delete():
+    sql = delete_metric_data(request.json)
+    return get_json_result(retcode=0, retmsg='success', data=sql)
+
+
 @manager.route('/component/parameters', methods=['post'])
 def component_parameters():
     request_data = request.json
@@ -159,7 +145,7 @@ def component_parameters():
         for role, partys_parameters in parameters.items():
             for party_parameters in partys_parameters:
                 if party_parameters.get('local', {}).get('role', '') == request_data['role'] and party_parameters.get(
-                        'local', {}).get('party_id', '') == request_data['party_id']:
+                        'local', {}).get('party_id', '') == int(request_data['party_id']):
                     output_parameters = {}
                     output_parameters['module'] = party_parameters.get('module', '')
                     for p_k, p_v in party_parameters.items():
@@ -173,6 +159,7 @@ def component_parameters():
 
 
 @manager.route('/component/output/model', methods=['post'])
+@job_utils.job_server_routing()
 def component_output_model():
     request_data = request.json
     check_request_parameters(request_data)
@@ -188,12 +175,11 @@ def component_output_model():
                                        train_runtime_conf=train_runtime_conf)
     component = dag.get_component_info(request_data['component_name'])
     output_model_json = {}
-    if component.get_output().get('model', []):
-        # There is only one model output at the current dsl version.
-        output_model = tracker.get_output_model(component.get_output()['model'][0])
-        for buffer_name, buffer_object in output_model.items():
-            if buffer_name.endswith('Param'):
-                output_model_json = json_format.MessageToDict(buffer_object, including_default_value_fields=True)
+    # There is only one model output at the current dsl version.
+    output_model = tracker.get_output_model(component.get_output()['model'][0] if component.get_output().get('model') else 'default')
+    for buffer_name, buffer_object in output_model.items():
+        if buffer_name.endswith('Param'):
+            output_model_json = json_format.MessageToDict(buffer_object, including_default_value_fields=True)
     if output_model_json:
         pipeline_output_model = tracker.get_output_model_meta()
         this_component_model_meta = {}
@@ -211,6 +197,7 @@ def component_output_model():
 
 
 @manager.route('/component/output/data', methods=['post'])
+@job_utils.job_server_routing()
 def component_output_data():
     request_data = request.json
     output_data_table = get_component_output_data_table(task_data=request_data)
@@ -234,12 +221,15 @@ def component_output_data():
 
 
 @manager.route('/component/output/data/download', methods=['get'])
+@job_utils.job_server_routing(307)
 def component_output_data_download():
     request_data = request.json
     output_data_table = get_component_output_data_table(task_data=request_data)
+    limit = request_data.get('limit', -1)
     if not output_data_table:
         return error_response(response_code=500, retmsg='no data')
-
+    if limit == 0:
+        return error_response(response_code=500, retmsg='limit is 0')
     output_data_count = 0
     have_data_label = False
     output_tmp_dir = os.path.join(os.getcwd(), 'tmp/{}'.format(get_fate_uuid()))
@@ -251,6 +241,8 @@ def component_output_data_download():
             data_line, have_data_label = get_component_output_data_line(src_key=k, src_value=v)
             fw.write('{}\n'.format(','.join(map(lambda x: str(x), data_line))))
             output_data_count += 1
+            if output_data_count == limit:
+                break
 
     if output_data_count:
         # get meta
@@ -277,22 +269,53 @@ def component_output_data_download():
         return send_file(memory_file, attachment_filename=tar_file_name, as_attachment=True)
 
 
+@manager.route('/component/output/data/table', methods=['post'])
+@job_utils.job_server_routing()
+def component_output_data_table():
+    request_data = request.json
+    data_views = query_data_view(**request_data)
+    if data_views:
+        return get_json_result(retcode=0, retmsg='success', data={'table_name': data_views[0].f_table_name,
+                                                                  'table_namespace': data_views[0].f_table_namespace})
+    else:
+        return get_json_result(retcode=100, retmsg='No found table, please check if the parameters are correct')
+
+
+# api using by task executor
+@manager.route('/<job_id>/<component_name>/<task_id>/<role>/<party_id>/metric_data/save', methods=['POST'])
+def save_metric_data(job_id, component_name, task_id, role, party_id):
+    request_data = request.json
+    tracker = Tracking(job_id=job_id, component_name=component_name, task_id=task_id, role=role, party_id=party_id)
+    metrics = [deserialize_b64(metric) for metric in request_data['metrics']]
+    tracker.save_metric_data(metric_namespace=request_data['metric_namespace'], metric_name=request_data['metric_name'],
+                             metrics=metrics, job_level=request_data['job_level'])
+    return get_json_result()
+
+
+@manager.route('/<job_id>/<component_name>/<task_id>/<role>/<party_id>/metric_meta/save', methods=['POST'])
+def save_metric_meta(job_id, component_name, task_id, role, party_id):
+    request_data = request.json
+    tracker = Tracking(job_id=job_id, component_name=component_name, task_id=task_id, role=role, party_id=party_id)
+    metric_meta = deserialize_b64(request_data['metric_meta'])
+    tracker.save_metric_meta(metric_namespace=request_data['metric_namespace'], metric_name=request_data['metric_name'],
+                             metric_meta=metric_meta, job_level=request_data['job_level'])
+    return get_json_result()
+
+
 def get_component_output_data_table(task_data):
     check_request_parameters(task_data)
     tracker = Tracking(job_id=task_data['job_id'], component_name=task_data['component_name'],
                        role=task_data['role'], party_id=task_data['party_id'])
     job_dsl_parser = job_utils.get_job_dsl_parser_by_job_id(job_id=task_data['job_id'])
     if not job_dsl_parser:
-        raise Exception('can get dag parser')
+        raise Exception('can not get dag parser, please check if the parameters are correct')
     component = job_dsl_parser.get_component_info(task_data['component_name'])
     if not component:
-        raise Exception('can found component')
+        raise Exception('can not found component, please check if the parameters are correct')
     output_dsl = component.get_output()
     output_data_dsl = output_dsl.get('data', [])
-    if not output_data_dsl:
-        return None
     # The current version will only have one data output.
-    output_data_table = tracker.get_output_data_table(output_data_dsl[0])
+    output_data_table = tracker.get_output_data_table(output_data_dsl[0] if output_data_dsl else 'component')
     return output_data_table
 
 
@@ -311,7 +334,7 @@ def get_component_output_data_line(src_key, src_value):
 
 def get_component_output_data_meta(output_data_table, have_data_label):
     # get meta
-    output_data_meta = storage.get_data_table_metas_by_instance(output_data_table)
+    output_data_meta = output_data_table.get_metas()
     schema = output_data_meta.get('schema', {})
     header = [schema.get('sid_name', 'sid')]
     if have_data_label:

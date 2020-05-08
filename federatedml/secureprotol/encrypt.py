@@ -15,6 +15,7 @@
 #
 
 import numpy as np
+from collections import Iterable
 from Cryptodome import Random
 from Cryptodome.PublicKey import RSA
 
@@ -22,9 +23,11 @@ from Cryptodome.PublicKey import RSA
 from federatedml.secureprotol import gmpy_math
 from federatedml.secureprotol.affine import AffineCipher
 from federatedml.secureprotol.fate_paillier import PaillierKeypair
+from federatedml.secureprotol.random import RandomPads
 
 
 # LOGGER = log_utils.getLogger()
+from federatedml.secureprotol.iterative_affine import IterativeAffineCipher
 
 
 class Encrypt(object):
@@ -69,50 +72,23 @@ class Encrypt(object):
         encrypt_table = X.mapValues(lambda x: self.encrypt(x))
         return encrypt_table
 
-        # decrypt a np.array with arbitrary dimension
-
-    def recursive_decrypt(self, A):
-        if not isinstance(A, np.ndarray) and not isinstance(A, list):
-            data_dict = A.collect()
-            data_dict = dict(data_dict)
-            A = list(data_dict.values())
-            A = np.array(A)
-
-        # LOGGER.debug("type A is {}".format(type(A)))
-        if isinstance(A, list):
-            A = np.array(A)
-        # LOGGER.debug("shape of A: {}".format(A.shape))
-        if len(A.shape) == 1:
-            A = np.expand_dims(A, axis=0)
-        decrypt_row = []
-        for row_index, row in enumerate(A):
-            if len(row.shape) >= 2:
-                decrypt_row.append(self.recursive_decrypt(row))
+    def _recursive_func(self, obj, func):
+        if isinstance(obj, np.ndarray):
+            if len(obj.shape) == 1:
+                return np.reshape([func(val) for val in obj], obj.shape)
             else:
-                decrypted_term = self.decrypt_list(row)
-                decrypt_row.append(decrypted_term)
-        return np.array(decrypt_row, dtype=np.float64)
+                return np.reshape([self._recursive_func(o, func) for o in obj], obj.shape)
+        elif isinstance(obj, Iterable):
+            return type(obj)(
+                self._recursive_func(o, func) if isinstance(o, Iterable) else func(o) for o in obj)
+        else:
+            return func(obj)
 
-    def recursive_encrypt(self, A):
-        if not isinstance(A, np.ndarray) and not isinstance(A, list):
-            data_dict = A.collect()
-            data_dict = dict(data_dict)
-            A = data_dict.values()
-            A = np.array(A)
+    def recursive_encrypt(self, X):
+        return self._recursive_func(X, self.encrypt)
 
-        if isinstance(A, list):
-            A = np.array(A)
-
-        if len(A.shape) == 1:
-            A = np.expand_dims(A, axis=0)
-        encrypt_row = []
-        for row_index, row in enumerate(A):
-            if len(row.shape) >= 2:
-                encrypt_row.append(self.recursive_encrypt(row))
-            else:
-                encrypted_term = self.encrypt_list(row)
-                encrypt_row.append(encrypted_term)
-        return np.array(encrypt_row, dtype=np.float64)
+    def recursive_decrypt(self, X):
+        return self._recursive_func(X, self.decrypt)
 
 
 class RsaEncrypt(Encrypt):
@@ -203,7 +179,7 @@ class FakeEncrypt(Encrypt):
         return value
 
 
-class SymmetricEncrypt(object):
+class SymmetricEncrypt(Encrypt):
     def __init__(self):
         self.key = None
 
@@ -217,6 +193,62 @@ class AffineEncrypt(SymmetricEncrypt):
 
     def generate_key(self, key_size=1024):
         self.key = AffineCipher.generate_keypair(key_size=key_size)
+
+    def encrypt(self, plaintext):
+        if self.key is not None:
+            return self.key.encrypt(plaintext)
+        else:
+            return None
+
+    def decrypt(self, ciphertext):
+        if self.key is not None:
+            return self.key.decrypt(ciphertext)
+        else:
+            return None
+
+
+class PadsCipher(Encrypt):
+
+    def __init__(self):
+        super().__init__()
+        self._uuid = None
+        self._rands = None
+
+    def set_self_uuid(self, uuid):
+        self._uuid = uuid
+
+    def set_exchanged_keys(self, keys):
+        self._seeds = {uid: v & 0xffffffff for uid, v in keys.items() if uid != self._uuid}
+        self._rands = {uid: RandomPads(v & 0xffffffff) for uid, v in keys.items() if uid != self._uuid}
+
+    def encrypt(self, value):
+        if isinstance(value, np.ndarray):
+            ret = value
+            for uid, rand in self._rands.items():
+                if uid > self._uuid:
+                    ret = rand.add_rand_pads(ret, 1.0)
+                else:
+                    ret = rand.add_rand_pads(ret, -1.0)
+            return ret
+        else:
+            ret = value
+            for uid, rand in self._rands.items():
+                if uid > self._uuid:
+                    ret += rand.rand(1)[0]
+                else:
+                    ret -= rand.rand(1)[0]
+            return ret
+
+    def decrypt(self, value):
+        return value
+
+
+class IterativeAffineEncrypt(SymmetricEncrypt):
+    def __init__(self):
+        super(IterativeAffineEncrypt, self).__init__()
+
+    def generate_key(self, key_size=1024, key_round=5):
+        self.key = IterativeAffineCipher.generate_keypair(key_size=key_size, key_round=key_round)
 
     def encrypt(self, plaintext):
         if self.key is not None:

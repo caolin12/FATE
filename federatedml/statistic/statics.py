@@ -20,7 +20,7 @@ import sys
 
 from arch.api.utils import log_utils
 from federatedml.feature.binning.quantile_binning import QuantileBinning
-from federatedml.feature.quantile_summaries import QuantileSummaries
+from federatedml.feature.binning.quantile_summaries import QuantileSummaries
 from federatedml.feature.instance import Instance
 from federatedml.param.feature_binning_param import FeatureBinningParam
 from federatedml.statistic import data_overview
@@ -77,7 +77,7 @@ class SummaryStatistics(object):
     @property
     def variance(self):
         mean = self.mean
-        variance = self.sum_square / self.count - 2 * self.sum * mean / self.count + mean ** 2
+        variance = self.sum_square / self.count - mean ** 2
         if math.fabs(variance) < consts.FLOAT_ZERO:
             return 0.0
         return variance
@@ -108,6 +108,8 @@ class MultivariateStatisticalSummary(object):
         else:
             self.abnormal_list = abnormal_list
         self._init_cols(data_instances)
+
+        self.label_summary = None
 
     def _init_cols(self, data_instances):
 
@@ -327,7 +329,7 @@ class MultivariateStatisticalSummary(object):
 
     def _get_quantile_median(self):
         cols_index = self._get_cols_index()
-        bin_param = FeatureBinningParam(bin_num=2, cols=cols_index)
+        bin_param = FeatureBinningParam(bin_num=2, bin_indexes=cols_index)
         binning_obj = QuantileBinning(bin_param, abnormal_list=self.abnormal_list)
         split_points = binning_obj.fit_split_points(self.data_instances)
         medians = {}
@@ -395,3 +397,30 @@ class MultivariateStatisticalSummary(object):
                 result[col_name] = summary_obj.std_variance
 
         return result
+
+    @staticmethod
+    def get_label_static_dict(data_instances):
+        result_dict = {}
+        for instance in data_instances:
+            label_key = instance[1].label
+            if label_key not in result_dict:
+                result_dict[label_key] = 1
+            else:
+                result_dict[label_key] += 1
+        return result_dict
+
+    @staticmethod
+    def merge_result_dict(dict_a, dict_b):
+        for k, v in dict_b.items():
+            if k in dict_a:
+                dict_a[k] += v
+            else:
+                dict_a[k] = v
+        return dict_a
+
+    def get_label_histogram(self):
+        label_histogram = self.data_instances.mapPartitions(self.get_label_static_dict).reduce(self.merge_result_dict)
+        return label_histogram
+
+
+

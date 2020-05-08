@@ -18,11 +18,19 @@ ARBITER = 'arbiter'
 HOST = 'host'
 GUEST = 'guest'
 
+
+MODEL_AGG = "model_agg"
+GRAD_AGG = "grad_agg"
+
 BINARY = 'binary'
 MULTY = 'multi'
 CLASSIFICATION = "classification"
 REGRESSION = 'regression'
 PAILLIER = 'Paillier'
+RANDOM_PADS = "RandomPads"
+NONE = "None"
+AFFINE = 'Affine'
+ITERATIVEAFFINE = 'IterativeAffine'
 L1_PENALTY = 'L1'
 L2_PENALTY = 'L2'
 
@@ -69,6 +77,7 @@ CONST = 'const'
 
 # decision tree
 MAX_SPLIT_NODES = 2 ** 16
+MAX_FEDERATED_NODES = 2 ** 10
 
 TRAIN_EVALUATE = 'train_evaluate'
 VALIDATE_EVALUATE = 'validate_evaluate'
@@ -88,8 +97,9 @@ UNIQUE_VALUE = 'unique_value'
 IV_VALUE_THRES = 'iv_value_thres'
 IV_PERCENTILE = 'iv_percentile'
 COEFFICIENT_OF_VARIATION_VALUE_THRES = 'coefficient_of_variation_value_thres'
-COEFFICIENT_OF_VARIATION_PERCENTILE = 'coefficient_of_variation_percentile'
+# COEFFICIENT_OF_VARIATION_PERCENTILE = 'coefficient_of_variation_percentile'
 OUTLIER_COLS = 'outlier_cols'
+MANUALLY_FILTER = 'manually'
 
 # imputer
 MIN = 'min'
@@ -109,3 +119,10 @@ MINMAXSCALE = 'min_max_scale'
 STANDARDSCALE = 'standard_scale'
 ALL = 'all'
 COL = 'col'
+
+# intersection cache
+PHONE = 'phone'
+IMEI = 'imei'
+MD5 = 'md5'
+SHA256 = 'sha256'
+INTERSECT_CACHE_TAG = 'Za'

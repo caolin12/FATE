@@ -1,3 +1,138 @@
+# Release 1.3.1
+## Major Features and Improvements
+>Deploy
+* Support deploying by MacOS
+* Support using external db
+* Deploy JDK and Python environments on demand
+* Improve MySQL and FATE Flow service.sh
+* Support more custom deployment configurations in the default_configurations.sh, such as ssh_port, mysql_port and so one.
+
+# Release 1.3.0
+## Major Features and Improvements
+>FederatedREC
+* Add federated recommendation submodule
+* Add heterogeneous Factoraization Machine
+* Add hemogeneous Factoraization Machine
+* Add heterogeneous Matrix Factorization
+* Add heterogeneous Singular Value Decomposition
+* Add heterogeneous SVD++ (Factorization Meets the Neighborhood)
+* Add heterogeneous Generalized Matrix Factorization
+
+>FederatedML
+* Support Sparse data training in heterogeneous General Linear Model(Hetero-LR、Hetero-LinR、Hetero-PoissonR)
+* Fix 32M limitation of quantile binning to support higher feature dimension
+* Fix 32M limitation of histogram statistics for  SecureBoost to support higher feature dimension training.
+* Add abnormal parameters and input data detection in OneHot Encoder
+* fix not passing validate data to fit process to support evaluate validation data during training process
+
+>FATE-Flow
+* Add clean job CLI for cleaning output and intermediate results, including data, metrics and sessions
+* Support for obtaining table namespace and name of output data via CLI
+* Fix KillJob unsuccessful execution in some special cases
+* Improve log system, add more exception and run time status prompts
+
+
+# Release 1.2.0
+## Major Features and Improvements
+FederatedML
+* Add heterogeneous Deep Neural Network
+* Add Secret-Sharing Protocol-SPDZ
+* Add heterogeneous feature correlation algorithm with SPDZ and support heterogeneous Pearson Correlation Calculation 
+* Add heterogeneous SQN optimizer, available for Hetero-LogisticRegression and Hetero-LinearRegression, which can reduce communication costs significantly 
+* Supports intersection for expanding duplicate IDs
+* Support multi-host in heterogeneous feature binning
+* Support multi-host in heterogeneous feature selection
+* Support IV calculation for categorical features in heterogeneous feature binning
+* Support transform raw feature value to WOE in heterogeneous feature binning 
+* Add manual filters in heterogeneous feature selection
+* Support performance comparison with sklearn's logistic regression
+* Automatic object/table clean in training iteration procedure in Federation
+* Improve transfer performance for large object
+* Add automatic scripts for submitting and running tasks
+
+FATE-Flow
+* Add data management module for recording the uploaded data tables and the outputs of the model in the job running, and for querying and cleaning up CLI. 
+* Support registration center for simplifying communication configuration between FATEFlow and FATEServing
+* Restruct model release logic, FATE_Flow pushes model directly to FATE-Serving. Decouple FATE-Serving and Eggroll, and the offline and online architectures are connected only by FATE-Flow.
+* Provide CLI to query data upload record
+* Upload and download data support progress statistics by line
+* Add some abnormal diagnosis tips
+* Support adding note information to job
+
+>Native Deploy
+* Fix bugs in EggRoll startup script, add mysql, redis startup options.
+* Disable host name resolution configuration for mysql service.
+* The version number of each module of the software packaging script is updated using the automatic acquisition mode.
+
+
+
+# Release 1.1.1
+## Major Features and Improvements
+* Add cluster deployment support based on ubuntu operating system。
+* Add union component which support data merging. 
+* Support indicating partial columns in Onehot Encoder
+* Support intermediate data cleanup after the task ends
+* Accelerated Intersection
+* Optimizing the deployment process
+
+
+## Bug Fixes
+* Fix a bug of secureboost' early stop 
+* Fix a bug in download api
+* Fix bugs of spark-backend
+
+
+# Release 1.1
+## Major Features and Improvements
+>FederatedML
+* Provide a general algorithm framework for homogeneous federated learning, which supports Secure Aggregation 
+* Add homogeneous Deep Neural Network
+* Add heterogeneous Linear Regression
+* Add heterogeneous Poisson Regression
+* Support multi-host in heterogeneous Logistic Regression
+* Support multi-host in heterogeneous Linear Regression
+* Support multi-host Intersection
+* Accelerated Intersection by usage of cache
+* Reconstruct heterogeneous Generalized Linear Models Framework
+* Support affine homomorphic encryption in heterogeneous SecureBoost
+* Support input data with missing value in heterogeneous SecureBoost
+* Support evaluation during training on both train and validate data
+* Add spark as computing engine
+
+>FATE-Flow
+* Upload and Download support CLI for querying job status
+* Support for canceling waiting job
+* Support for setting job timeout
+* Support for storing a job scheduling log in the job log folder
+* Add authentication control Beta version, including component, command, role
+
+# Release 1.0.2
+## Major Features and Improvements
+* Python and JDK environment are required only for running standalone version quick experiment
+* Support cluster version docker deployment
+* Add deployment guide in Chinese
+* Standalone version job for quick experiment is supported when cluster version deployed. 
+* Python service log will remain for 14 days now.
+
+
+## Bug Fixes
+* Fix bugs of multi-host support in Cross-Validation
+* Fix bugs of showing up evaluation metrics when both train and eval exist
+* Add links for each algorithm module in FederatedML home page README
+
+
+# Release 1.0.1
+## Bug Fixes
+* Fix bugs for evaluation data type 
+* Fix bugs for feature binning to take abnormal values into consideration
+* Fix bugs for train and eval
+* Fix bugs in binning merge
+* Fix bugs in Samplers
+* Fix federated feature selection feature filter bug
+* Support upload file  in version argument
+* Support get serviceRoleName from configuration
+
+
 # Release 1.0
 ## Major Features and Improvements
 >This version includes two new products of FATE, FATE-Board, and FATE-Flow respectively, FATE-Board as a visual tool for federation modeling, and FATE-Flow is an end to end pipeline platform for federated learning. This version contains important improvements to the FederatedML, which better tracks the running progress of federated learning algorithms.
